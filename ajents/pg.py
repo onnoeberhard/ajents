@@ -1,207 +1,78 @@
 """Policy Gradient algorithms"""
-
-# REINFORCE
-# 1. sample trajectories
-# 2. compute rewards to go
-# 3. compute policy gradient estimate
-# 4. update policy
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 # from rlax import policy_gradient_loss
-# from ajents.base import Agent
 from tqdm import trange
 
-# First: no neural network, just a linear function.
-class REINFORCE():
-    # Class holds only hyperparameters.. ?
-    # Q / policy states are taken as input/output.. (maybe??)
-    # only if this is necessary. I think the only good reason for a functional approach is that  JAX transformations are possible, but if the environment is slow anyway.... is this necessary?
-    # __init__ needs a gen_env function for logging (optinal)
-    def collect_trajectory(self, key, env, log_policy, params):
-        observations = []
-        actions = []
-        rewards = []
-        
+from ajents.base import Agent
+
+
+class REINFORCE(Agent):
+    def __init__(self, env, key, log_policy, params, causal=True, baseline='mean'):
+        super().__init__(env, key)
+        self.log_policy = log_policy
+        self.params = params
+        self.baseline = baseline
+        self.causal = causal
+
+    @partial(jax.jit, static_argnums=(0,))
+    @partial(jax.vmap, in_axes=(None, None, 0, 0))
+    @partial(jax.vmap, in_axes=(None, None, 0, 0))
+    def grad_log_policy(self, params, obs, action):
+        """Gradient (wrt. params) of log-policy at given state-action pair"""
+        return jax.lax.cond(jnp.isnan(action),
+            lambda: jax.tree_map(lambda x: x*jnp.nan, params),
+            lambda: jax.tree_map(lambda leaf: leaf[action.astype(int)], jax.jacobian(self.log_policy)(params, obs))
+        )
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _act_explore(self, params, obs, key):
         key, subkey = jax.random.split(key)
-        obs = env.reset(seed=subkey[0].item())
-        env.render()
-        observations.append(obs)
+        return jax.random.categorical(subkey, self.log_policy(params, obs)), key
 
-        done = False
-        while not done:
-            key, subkey = jax.random.split(key)
-            action = jax.random.categorical(subkey, log_policy(params, obs))
-            obs, reward, done, _ = env.step(np.asarray(action))
-            env.render()
-            actions.append(action)
-            rewards.append(reward)
-            observations.append(obs)
-            #returns = returns.at[i].add(reward)
-            # breakpoint()
-            #log_pi_grad = jax.tree_map(lambda x, y: x + y[action.item()], log_pi_grad, lpg(params, obs))
-        return observations, actions, rewards
+    @partial(jax.jit, static_argnums=(0,))
+    def _act_exploit(self, params, obs):
+        return jnp.argmax(self.log_policy(params, obs))
 
-    # def lpg_trajectory(self, )
-                # jax.grad(lambda p, o: log_policy(p, o)[action])(params, obs))
-    def learn(self, log_policy, params, env, key, N=20, lr=0.01):
-        log_policy_grad = jax.jit(jax.vmap(lambda params, obs, action: 
-            jax.tree_map(lambda leaf: leaf[action], jax.jacrev(log_policy)(params, obs)), in_axes=(None, 0, 0)))
+    def act(self, obs, explore=True):
+        """Sample action from current policy"""
+        if explore:
+            action, self.key = self._act_explore(self.params, obs, self.key)
+            return action
+        return self._act_exploit(self.params, obs)
 
-        for j in range(50):    # 100 optimizer steps
-            returns = jnp.empty(N)
-            grad = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-            for i in trange(N):
-                key, subkey = jax.random.split(key)
-                observations, actions, rewards = self.collect_trajectory(subkey, env, log_policy, params)
-                returns = returns.at[i].set(sum(rewards))
-                traj_grads = log_policy_grad(params, jnp.array(observations[:-1]), jnp.array(actions))
-                grad = jax.tree_map(lambda grad, traj_grads: grad + traj_grads.sum(0)*returns[i], grad, traj_grads)
-                # breakpoint()
-                # g = jax.tree_util.tree_reduce(jnp.sum, g)
-                # breakpoint()    # tree? shape?
-                # log_pi_grad = 
-                # log_pi_grad = jax.tree_map(lambda x, y: x + y[action.item()], log_pi_grad, lpg(params, obs))
+    @partial(jax.jit, static_argnums=(0,))
+    def update(self, params, observations, actions, rewards, lr):
+        # Calculate policy gradient from rollouts
+        grads = self.grad_log_policy(params, observations, actions)
+        grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
+        returns = jnp.nansum(rewards, 1)
+        grads = jax.tree_map(lambda x: (x.T @ returns).T, grads)
 
-                # policy gradient of this trajectory
-                # breakpoint()
-                # traj_grad = jax.tree_map(lambda x: x * returns[i], log_pi_grad)    # weighting
-                # grad = jax.tree_map(lambda x, y: x + y, grad, traj_grad)
-            print(f"Step {j}. Average return = {returns.mean()}")
-
-            # Update policy
-            params = jax.tree_map(lambda p, g: p + lr*g, params, grad)
-        
-    # def learn2(self, log_policy, params, env, key, N=100, lr=0.01):
-    #     # gradient of log-policy
-    #     glp = jax.jit(jax.jacobian(log_policy))
-
-    #     for j in range(5):
-    #         returns = []    # return of each rollout
-    #         lpgrads = []    # gradient of log-policy of each rollout
-    #         grad = jax.tree_map(lambda x: jnp.zeros_like(x), params)    # Policy gradient
-
-    #         # Collect N trajectories
-    #         for i in trange(N):
-    #             # Collect rollout
-    #             key, subkey = jax.random.split(key)
-    #             observations, actions, rewards = self.collect_trajectory(subkey, env, log_policy, params)
-                
-    #             # Calculate rollout return and gradient of log-policy
-    #             returns.append(sum(rewards))
-    #             lpgrad = [jax.tree_map(lambda w: w[a], glp(params, o)) for o, a in zip(observations, actions)]
-    #             lpgrad = jax.tree_map(lambda *x: sum(x), *lpgrad)
-    #             lpgrads.append(lpgrad)
-
-    #             # breakpoint()
-    #             # lpgrads.append(jax.tree_map(jnp.sum, *(glp(params, o)[a] for o, a in zip(observations, actions))))
-
-    #             # jax.tree_map(lambda *x: sum(x), *(glp(params, o) for o, a in zip(observations, actions)))
-
-    #             # # policy gradient
-    #             # log_pi_grad = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-    #             # for obs, action in zip(observations[:-1], actions):
-    #             #     g = jax.grad(lambda p, o: log_policy(p, o)[action])(params, obs)
-    #             #     log_pi_grad = jax.tree_map(lambda x, y: x + y, log_pi_grad, g)
-                
-    #             # grad = jax.tree_map(lambda g, lpg: g + lpg*returns[i], grad, log_pi_grad)
-
-    #         print(f"Step {j}. Average return = {jnp.array(returns).mean()}")
-
-    #         # Policy gradient
-    #         grad = [jax.tree_map(lambda lpg: lpg*r, lpg) for lpg, r in zip(lpgrads, returns)]
-    #         grad = jax.tree_map(lambda *x: sum(x), *grad)
-    #         # grad = jax.tree_reduce(jnp.sum, grad)
-
-    #         # Update policy
-    #         params = jax.tree_map(lambda p, g: p + lr*g, params, grad)
-        
-    # def learn3(self, log_policy, params, env, key, N=100, lr=0.01):
-    #     for j in range(5):
-    #         returns = jnp.empty(N)
-    #         grad = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-
-    #         for i in trange(N):
-    #             key, subkey = jax.random.split(key)
-    #             observations, actions, rewards = self.collect_trajectory(subkey, env, log_policy, params)
-    #             returns = returns.at[i].set(sum(rewards))
-
-    #             def pg_loss(params, observations, actions, rewards):
-    #                 logits = jax.vmap(log_policy, in_axes=(None, 0))(params, observations)
-    #                 return policy_gradient_loss(logits, actions, rewards, jnp.ones_like(rewards)/len(rewards))
-
-    #             # trajectory gradient
-    #             g = jax.grad(pg_loss)(params, jnp.array(observations[:-1]), jnp.array(actions), jnp.array(rewards))
-
-    #             # policy gradient
-    #             # log_pi_grad = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-    #             # for obs, action in zip(observations[:-1], actions):
-    #             #     g = jax.grad(lambda p, o: log_policy(p, o)[action])(params, obs)
-    #             #     log_pi_grad = jax.tree_map(lambda x, y: x + y, log_pi_grad, g)
-                
-    #             grad = jax.tree_map(lambda grad, g: grad + g, grad, g)
-
-    #         print(f"Step {j}. Average return = {returns.mean()}")
-
-    #         # Update policy
-    #         params = jax.tree_map(lambda p, g: p - lr*g, params, grad)
-
-            
-        # this function takes in the policy function (would be great to be agnostic: take in flax network, fine, but also just take in linear python / JAX function.)
-        # also training parameters.
-        # this function should take as little positional arguments as possible.
-        # returns trained policy, does everything in between.
-        
-
-# Online actor critic
+        # Update policy
+        return jax.tree_map(lambda p, g: p + lr*g, params, grads)
 
 
-# Off-policy actor critic
+    def learn(self, n_iterations, n_rollouts, lr=0.01):
+        for j in range(n_iterations):
+            # - Collect rollouts -
+            observations = []
+            actions = []
+            rewards = []
+            for _ in (pb := trange(n_rollouts, leave=False)):
+                os, as_, rs, _ = self.rollout(render=False, pad=True)
+                observations.append(os)
+                actions.append(as_)
+                rewards.append(rs)
 
+            observations = jnp.array(observations)
+            actions = jnp.array(actions)
+            rewards = jnp.array(rewards)
 
-# natural policy gradient?
+            print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. Average return = {jnp.nansum(rewards, 1).mean():f}, Completed in {pb._time() - pb.start_t:.2f}s.")
 
-
-# also: trpo (but separately)
-
-def add(a, b):
-    return a + b
-
-if __name__ == '__main__':
-    import gym
-    env = gym.make('CartPole-v1')
-
-    @jax.jit
-    def log_policy(params, obs):
-        return params['weights'] @ obs + params['bias']
-    
-    key = jax.random.PRNGKey(42)
-    key, sk1, sk2 = jax.random.split(key, 3)
-    params = {'weights': 0.01 * jax.random.normal(sk1, (env.action_space.n, env.observation_space.shape[0])), 
-              'bias': 0.01 * jax.random.normal(sk2, (env.action_space.n,))}
-    
-    
-    agent = REINFORCE()
-    # with jax.profiler.trace("/tmp/tensorboard"):
-    key, subkey = jax.random.split(key)
-    import datetime
-    # start = datetime.datetime.now()
-    # agent.learn(log_policy, params, env, subkey)
-    # end = datetime.datetime.now()
-    # print(end - start)
-
-    start = datetime.datetime.now()
-    agent.learn(log_policy, params, env, subkey)
-    end = datetime.datetime.now()
-    print(end - start)
-
-    # start = datetime.datetime.now()
-    # agent.learn3(log_policy, params, env, subkey)
-    # end = datetime.datetime.now()
-    # print(end - start)
-    # print(end - start)
-    # start = datetime.datetime.now()
-    # agent.learn3(log_policy, params, env, subkey)
-    # end = datetime.datetime.now()
-    # print(end - start)
+            # - Update policy -
+            self.params = self.update(self.params, observations, actions, rewards, lr)
