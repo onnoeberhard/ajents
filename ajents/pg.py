@@ -3,14 +3,12 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-# from rlax import policy_gradient_loss
-from tqdm import trange
 
 from ajents.base import Agent
 
 
 class REINFORCE(Agent):
+    """REINFORCE (Vanilla Policy Gradient) Agent class"""
     def __init__(self, env, key, log_policy, params, causal=True, baseline='mean'):
         super().__init__(env, key)
         self.log_policy = log_policy
@@ -45,7 +43,8 @@ class REINFORCE(Agent):
         return self._act_exploit(self.params, obs)
 
     @partial(jax.jit, static_argnums=(0,))
-    def update(self, params, observations, actions, rewards, lr):
+    def update(self, params, observations, actions, rewards, learning_rate):
+        """Calculate policy gradient and take one gradient ascent step."""
         # Calculate policy gradient from rollouts
         grads = self.grad_log_policy(params, observations, actions)
         grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
@@ -53,26 +52,18 @@ class REINFORCE(Agent):
         grads = jax.tree_map(lambda x: (x.T @ returns).T, grads)
 
         # Update policy
-        return jax.tree_map(lambda p, g: p + lr*g, params, grads)
+        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads), returns.mean()
 
 
-    def learn(self, n_iterations, n_rollouts, lr=0.01):
+    def learn(self, n_iterations, n_rollouts, learning_rate=0.01, render=False):
+        """Train REINFORCE agent"""
         for j in range(n_iterations):
-            # - Collect rollouts -
-            observations = []
-            actions = []
-            rewards = []
-            for _ in (pb := trange(n_rollouts, leave=False)):
-                os, as_, rs, _ = self.rollout(render=False, pad=True)
-                observations.append(os)
-                actions.append(as_)
-                rewards.append(rs)
+            # Collect rollouts
+            observations, actions, rewards, info = self.rollouts(n_rollouts, render=render)
 
-            observations = jnp.array(observations)
-            actions = jnp.array(actions)
-            rewards = jnp.array(rewards)
+            # Update policy
+            self.params, ret = self.update(self.params, observations, actions, rewards, learning_rate)
 
-            print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. Average return = {jnp.nansum(rewards, 1).mean():f}, Completed in {pb._time() - pb.start_t:.2f}s.")
-
-            # - Update policy -
-            self.params = self.update(self.params, observations, actions, rewards, lr)
+            # Monitoring
+            print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. "
+                  f"Average return = {ret:f}, Completed in {info['time']:.2f}s.")

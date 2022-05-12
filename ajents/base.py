@@ -1,17 +1,26 @@
+"""Base classes for Ajents"""
+from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
+from tqdm.auto import tqdm
 
 
 class Agent:
+    """Abstract agent class"""
     def __init__(self, env, key):
         self.env = env
         self.key = key
-    
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _split_seed(self, key):
+        key, subkey = jax.random.split(key)
+        return subkey[0], key
+
     def reset(self, render=False):
         """Start new episode in environment and get first observation"""
-        self.key, subkey = jax.random.split(self.key)
-        obs = self.env.reset(seed=subkey[0].item())
+        seed, self.key = self._split_seed(self.key)
+        obs = self.env.reset(seed=np.asarray(seed).item())
         if render:
             self.render()
         return obs
@@ -24,6 +33,7 @@ class Agent:
         return obs, reward, done, info
 
     def render(self):
+        """Render state of the environment in window"""
         self.env.render()
 
     def rollout(self, steps=None, render=False, explore=True, pad=False):
@@ -33,7 +43,7 @@ class Agent:
         actions = []
         rewards = []
         info = {'steps': 0, 'terminations': 0}
-        
+
         # First observation
         obs = self.reset(render)
         observations.append(obs)
@@ -56,7 +66,7 @@ class Agent:
             steps_left -= 1
             if steps is None and done:
                 break
-        
+
         if pad:
             observations = np.array(
                 observations + [np.ones_like(obs) * np.nan] * (self.env._max_episode_steps - len(observations)))
@@ -66,8 +76,33 @@ class Agent:
 
         return observations, actions, rewards, info
 
-    def predict(self, obs):
-        pass    # for distribution?
+    def rollouts(self, n_rollouts, array=True, progress=True, render=False):
+        """Collect multiple rollouts"""
+        observations = []
+        actions = []
+        rewards = []
 
-    def act(self, obs, explore):
-        pass   # for determinstic action?
+        it = range(n_rollouts)
+        if progress:
+            it = tqdm(it, leave=False)
+
+        for _ in it:
+            os, as_, rs, _ = self.rollout(render=render, pad=array)
+            observations.append(os)
+            actions.append(as_)
+            rewards.append(rs)
+
+        if array:
+            observations = jnp.array(np.array(observations))
+            actions = jnp.array(np.array(actions))
+            rewards = jnp.array(np.array(rewards))
+
+        info = {}
+        if progress:
+            info['time'] = it._time() - it.start_t
+
+        return observations, actions, rewards, info
+
+    def act(self, obs, explore=True):
+        """Sample action from policy"""
+        raise NotImplementedError
