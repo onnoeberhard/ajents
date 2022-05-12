@@ -28,10 +28,10 @@ def main(profile, test, view):
             'bias': 0.01 * jax.random.normal(sk2, (env.action_space.n,))}
 
     key, subkey = jax.random.split(key)
-    agent = REINFORCE(env, subkey, log_policy, params, causal=False, baseline=False)
+    agent = REINFORCE(env, subkey, log_policy, params)
     start = datetime.now()
     with jax.profiler.trace('tmp/tensorboard') if profile else contextlib.nullcontext():
-        agent.learn(20, 100)
+        agent.learn(15, 100)
         print(f"Traning finished after {datetime.now() - start}!")
 
     if test:

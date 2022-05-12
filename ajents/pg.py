@@ -10,12 +10,10 @@ from ajents.base import Agent
 
 class REINFORCE(Agent):
     """REINFORCE (Vanilla Policy Gradient) Agent class"""
-    def __init__(self, env, key, log_policy, params, causal=True, baseline=True):
+    def __init__(self, env, key, log_policy, params):
         super().__init__(env, key)
         # Fixed parameters
         self.log_policy = log_policy
-        self.baseline = baseline
-        self.causal = causal
 
         # Variables
         self.params = params
@@ -52,15 +50,8 @@ class REINFORCE(Agent):
         # Calculate policy gradient from rollouts
         grads = self.grad_log_policy(params, observations, actions)
         returns = jnp.nansum(rewards, 1)
-        if self.causal:
-            rewards_to_go = returns[:, None] - jnp.nancumsum(rewards, 1) + rewards
-            advantage = rewards_to_go - rewards_to_go.mean(0) if self.baseline else rewards_to_go
-            grads = jax.tree_map(lambda x: jax.vmap(jax.vmap(jnp.multiply))(x, advantage), grads)
-            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
-        else:
-            advantage = returns - returns.mean() if self.baseline else returns
-            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
-            grads = jax.tree_map(lambda x: jax.vmap(jnp.multiply)(x, advantage), grads)
+        grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
+        grads = jax.tree_map(lambda x: jax.vmap(jnp.multiply)(x, returns), grads)
         grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
