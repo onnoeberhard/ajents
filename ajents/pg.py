@@ -3,18 +3,22 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from ajents.base import Agent
 
 
 class REINFORCE(Agent):
     """REINFORCE (Vanilla Policy Gradient) Agent class"""
-    def __init__(self, env, key, log_policy, params, causal=True, baseline='mean'):
+    def __init__(self, env, key, log_policy, params, causal=True, baseline=True):
         super().__init__(env, key)
+        # Fixed parameters
         self.log_policy = log_policy
-        self.params = params
         self.baseline = baseline
         self.causal = causal
+
+        # Variables
+        self.params = params
 
     @partial(jax.jit, static_argnums=(0,))
     @partial(jax.vmap, in_axes=(None, None, 0, 0))
@@ -47,22 +51,34 @@ class REINFORCE(Agent):
         """Calculate policy gradient and take one gradient ascent step."""
         # Calculate policy gradient from rollouts
         grads = self.grad_log_policy(params, observations, actions)
-        grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
         returns = jnp.nansum(rewards, 1)
-        grads = jax.tree_map(lambda x: (x.T @ returns).T, grads)
+        if self.causal:
+            rewards_to_go = returns[:, None] - jnp.nancumsum(rewards, 1) + rewards
+            advantage = rewards_to_go - rewards_to_go.mean(0) if self.baseline else rewards_to_go
+            grads = jax.tree_map(lambda x: jax.vmap(jax.vmap(jnp.multiply))(x, advantage), grads)
+            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
+        else:
+            advantage = returns - returns.mean() if self.baseline else returns
+            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
+            grads = jax.tree_map(lambda x: jax.vmap(jnp.multiply)(x, advantage), grads)
+        grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
         return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads), returns.mean()
 
-
-    def learn(self, n_iterations, n_rollouts, learning_rate=0.01, render=False):
+    def learn(self, n_iterations, n_rollouts, learning_rate=None, render=False):
         """Train REINFORCE agent"""
+        if learning_rate is None:
+            learning_rate = lambda i: 1/(i+1)
+        elif np.isscalar(learning_rate):
+            learning_rate = lambda _: learning_rate
+
         for j in range(n_iterations):
             # Collect rollouts
             observations, actions, rewards, info = self.rollouts(n_rollouts, render=render)
 
             # Update policy
-            self.params, ret = self.update(self.params, observations, actions, rewards, learning_rate)
+            self.params, ret = self.update(self.params, observations, actions, rewards, learning_rate(j))
 
             # Monitoring
             print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. "

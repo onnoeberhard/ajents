@@ -1,15 +1,19 @@
 """Train linear policy with REINFORCE on CartPole"""
 import contextlib
 from datetime import datetime
+
+import click
 import gym
 import jax
-import click
-
+import jax.numpy as jnp
 from ajents.pg import REINFORCE
 
+
 @click.command()
-@click.option('--profile', is_flag=True, default=False)
-def main(profile):
+@click.option('--profile', is_flag=True, default=False, show_default=True)
+@click.option('--test/--no-test', is_flag=True, default=True, show_default=True)
+@click.option('--view/--no-view', is_flag=True, default=True, show_default=True)
+def main(profile, test, view):
     """Train linear policy with REINFORCE on CartPole"""
     env = gym.make('CartPole-v1')
 
@@ -24,12 +28,17 @@ def main(profile):
             'bias': 0.01 * jax.random.normal(sk2, (env.action_space.n,))}
 
     key, subkey = jax.random.split(key)
-    agent = REINFORCE(env, subkey, log_policy, params)
+    agent = REINFORCE(env, subkey, log_policy, params, causal=False, baseline=False)
     start = datetime.now()
     with jax.profiler.trace('tmp/tensorboard') if profile else contextlib.nullcontext():
-        agent.learn(10, 100, learning_rate=0.01)
+        agent.learn(20, 100)
         print(f"Traning finished after {datetime.now() - start}!")
-    while True:
+
+    if test:
+        _, _, rewards, _ = agent.rollouts(500, explore=False)
+        print(f"Average test return: {jnp.nansum(rewards, 1).mean()}")
+
+    while view:
         _, _, rewards, _ = agent.rollout(explore=False, render=True)
         print(f"Rollout score: {sum(rewards)}")
 

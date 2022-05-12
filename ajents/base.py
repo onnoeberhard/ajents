@@ -1,5 +1,6 @@
 """Base classes for Ajents"""
 from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -76,7 +77,7 @@ class Agent:
 
         return observations, actions, rewards, info
 
-    def rollouts(self, n_rollouts, array=True, progress=True, render=False):
+    def rollouts(self, n_rollouts, array=True, progress=True, render=False, explore=True):
         """Collect multiple rollouts"""
         observations = []
         actions = []
@@ -87,7 +88,7 @@ class Agent:
             it = tqdm(it, leave=False)
 
         for _ in it:
-            os, as_, rs, _ = self.rollout(render=render, pad=array)
+            os, as_, rs, _ = self.rollout(render=render, pad=array, explore=explore)
             observations.append(os)
             actions.append(as_)
             rewards.append(rs)
