@@ -12,10 +12,11 @@ class REINFORCE(Agent):
     """REINFORCE (Vanilla Policy Gradient) Agent class"""
     def __init__(self, env, key, log_policy, params, causal=True, baseline=True):
         super().__init__(env, key)
+
         # Fixed parameters
         self.log_policy = log_policy
-        self.baseline = baseline
         self.causal = causal
+        self.baseline = baseline
 
         # Variables
         self.params = params
@@ -64,22 +65,30 @@ class REINFORCE(Agent):
         grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
-        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads), returns.mean()
+        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads)#, returns.mean()
 
-    def learn(self, n_iterations, n_rollouts, learning_rate=None, render=False):
+    def learn(self, n_iterations, n_rollouts, learning_rate=None, render=False, threshold=None):
         """Train REINFORCE agent"""
         if learning_rate is None:
-            learning_rate = lambda i: 1/(i+1)
+            lr = lambda i: 1/(i+1)
         elif np.isscalar(learning_rate):
-            learning_rate = lambda _: learning_rate
+            lr = lambda _: learning_rate
 
         for j in range(n_iterations):
             # Collect rollouts
             observations, actions, rewards, info = self.rollouts(n_rollouts, render=render)
-
-            # Update policy
-            self.params, ret = self.update(self.params, observations, actions, rewards, learning_rate(j))
+            ret = np.nansum(rewards, 1).mean()
 
             # Monitoring
             print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. "
                   f"Average return = {ret:f}, Completed in {info['time']:.2f}s.")
+
+            # Break if threshold is reached
+            if threshold is not None and ret >= threshold:
+                print("Solved!")
+                break
+
+            # Calculate policy gradient and update policy
+            self.params = self.update(self.params, observations, actions, rewards, lr(j))
+
+        return j + 1

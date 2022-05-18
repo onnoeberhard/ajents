@@ -69,8 +69,8 @@ class Agent:
                 break
 
         if pad:
-            observations = np.array(
-                observations + [np.ones_like(obs) * np.nan] * (self.env._max_episode_steps - len(observations)))
+            observations = np.array(observations
+                + [np.ones_like(obs) * np.nan] * (self.env._max_episode_steps - len(observations) + 1))[:-1]
             actions = np.array(
                 actions + [np.ones_like(action) * np.nan] * (self.env._max_episode_steps - len(actions)))
             rewards = np.array(rewards + [np.nan] * (self.env._max_episode_steps - len(rewards)))
