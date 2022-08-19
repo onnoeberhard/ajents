@@ -1,24 +1,26 @@
-"""Train linear policy with REINFORCE on CartPole"""
+"""Train linear policy with REINFORCE on Pendulum"""
 from datetime import datetime
 
 import click
 import gym
 import jax
 import jax.numpy as jnp
-from ajents.base import CategoricalPolicy
+import oscillator
+from ajents.base import GaussianPolicy
 from ajents.pg import REINFORCE
 
 
 @jax.jit
-def policy_logits(params, obs):
+def policy_mu_log_sigma(params, obs):
     """Policy linear in observation"""
     return params['weights'] @ obs + params['bias']
 
 def init_params(key, env):
     """Initialize parameters of log-linear policy."""
     key1, key2 = jax.random.split(key)
-    params = {'weights': 0.01 * jax.random.normal(key1, (env.action_space.n, env.observation_space.shape[0])),
-              'bias': 0.01 * jax.random.normal(key2, (env.action_space.n,))}
+    params = {
+        'weights': 0.01 * jax.random.normal(key1, (2*env.action_space.shape[0], env.observation_space.shape[0])),
+        'bias': 0.01 * jax.random.normal(key2, (2*env.action_space.shape[0],))}
     return params
 
 @click.command()
@@ -27,13 +29,15 @@ def init_params(key, env):
 @click.option('--test/--no-test', is_flag=True, default=True, show_default=True)
 @click.option('--view/--no-view', is_flag=True, default=True, show_default=True)
 def main(profile, test, view):
-    """Train linear policy with REINFORCE on CartPole"""
-    env = gym.make('CartPole-v1')
+    """Train linear policy with REINFORCE on Pendulum"""
+    # env = gym.make('Pendulum-v1')
+    env = gym.make('Oscillator-v0', target=None)
     key = jax.random.PRNGKey(42)
 
     # Initialize policy
     key, subkey = jax.random.split(key)
-    policy = CategoricalPolicy(policy_logits)
+    policy = GaussianPolicy(policy_mu_log_sigma, bounds=(env.action_space.low, env.action_space.high))
+    # breakpoint()
     params = init_params(subkey, env)
 
     # Initialize agent
@@ -46,7 +50,7 @@ def main(profile, test, view):
 
     # Train agent
     start = datetime.now()
-    agent.learn(1000, 10, learning_rate=0.001, threshold=500)
+    agent.learn(1, 10, learning_rate=0.001)
     print(f"Training finished after {datetime.now() - start}!")
 
     if profile:
@@ -61,7 +65,7 @@ def main(profile, test, view):
 
     # Watch final policy in action
     while view:
-        _, _, rewards, _ = agent.rollout(explore=False, render=True)
+        _, _, rewards, _ = agent.rollout(explore=True, render=True)
         print(f"Rollout score: {sum(rewards)}")
 
 if __name__ == '__main__':

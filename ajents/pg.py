@@ -10,35 +10,35 @@ from ajents.base import Agent
 
 class REINFORCE(Agent):
     """REINFORCE (Vanilla Policy Gradient) Agent class"""
-    def __init__(self, env, key, log_policy, params, causal=True, baseline=True):
+    def __init__(self, env, key, policy, params, causal=True, baseline=True):
         super().__init__(env, key)
 
         # Fixed parameters
-        self.log_policy = log_policy
+        self.policy = policy
         self.causal = causal
         self.baseline = baseline
 
         # Variables
         self.params = params
 
-    @partial(jax.jit, static_argnums=(0,))
+    # @partial(jax.jit, static_argnums=(0,))    # jit necessary here?
     @partial(jax.vmap, in_axes=(None, None, 0, 0))
     @partial(jax.vmap, in_axes=(None, None, 0, 0))
     def grad_log_policy(self, params, obs, action):
         """Gradient (wrt. params) of log-policy at given state-action pair"""
-        return jax.lax.cond(jnp.isnan(action),
+        return jax.lax.cond(jnp.isnan(action).any(),
             lambda: jax.tree_map(lambda x: x*jnp.nan, params),
-            lambda: jax.tree_map(lambda leaf: leaf[action.astype(int)], jax.jacobian(self.log_policy)(params, obs))
+            lambda: jax.jacobian(self.policy.log_pi)(params, obs, action)
         )
 
     @partial(jax.jit, static_argnums=(0,))
     def _act_explore(self, params, obs, key):
         key, subkey = jax.random.split(key)
-        return jax.random.categorical(subkey, self.log_policy(params, obs)), key
+        return self.policy.sample(params, obs, subkey, pre=True), key
 
     @partial(jax.jit, static_argnums=(0,))
     def _act_exploit(self, params, obs):
-        return jnp.argmax(self.log_policy(params, obs))
+        return self.policy.greedy(params, obs)
 
     def act(self, obs, explore=True):
         """Sample action from current policy"""
@@ -47,7 +47,7 @@ class REINFORCE(Agent):
             return action
         return self._act_exploit(self.params, obs)
 
-    @partial(jax.jit, static_argnums=(0,))
+    # @partial(jax.jit, static_argnums=(0,))
     def update(self, params, observations, actions, rewards, learning_rate):
         """Calculate policy gradient and take one gradient ascent step."""
         # Calculate policy gradient from rollouts
@@ -89,6 +89,14 @@ class REINFORCE(Agent):
                 break
 
             # Calculate policy gradient and update policy
-            self.params = self.update(self.params, observations, actions, rewards, lr(j))
+            params_ = self.update(self.params, observations, actions, rewards, lr(j))
+            # print(actions[0, 0], observations[0, 0])
+            # print(self.policy.log_pi(self.params, observations[0, 0], actions[0, 0]))
+            # print(self.policy.f(self.params, observations[0, 0]))
+            # breakpoint()
+            # if jnp.isnan(params_['weights']).any():
+            # if j > 2:
+            #     breakpoint()
+            self.params = params_
 
         return j + 1

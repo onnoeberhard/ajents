@@ -19,8 +19,7 @@ class MLP(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        x = nn.Dense(self.n_actions)(x)
-        x = nn.log_softmax(x)
+        x = nn.Dense(self.n_actions)(x)    # Logits (unnormalized scores)
         return x
 
 
