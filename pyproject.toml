@@ -5,11 +5,10 @@ description = "RL agents in JAX"
 authors = ["Onno Eberhard <onnoeberhard@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.8, <3.10"
-flax = "^0.4.1"
-# rlax = "^0.1.2"
-jax = "^0.3.10"
+python = ">=3.8, <3.11"
 tqdm = "^4.64.0"
+jax = "^0.3.16"
+jaxlib = "^0.3.15"
 
 [tool.poetry.dev-dependencies]
 gym = "^0.23.1"
@@ -19,14 +18,14 @@ pytest = "^7.1.2"
 ipdb = "^0.13.9"
 pdbpp = "^0.10.3"
 # snakeviz = "^2.1.1"
-# tensorflow = "^2.8.0"
+# tensorflow = "^2.6.0"
 # tbp-nightly = "^2.9.0-alpha.20220413"
-dm-control = "^1.0.2"
+# dm-control = "^1.0.2"
 pylint = "^2.13.8"
 click = "^8.1.3"
-matplotlib = "^3.5.2"
-jupyter = "^1.0.0"
-oscillator-gym = "^1.0.0"
+# matplotlib = "^3.5.2"
+# jupyter = "^1.0.0"
+# oscillator-gym = "^1.0.0"
 
 [tool.pytest.ini_options]
 filterwarnings = [

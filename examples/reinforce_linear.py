@@ -1,7 +1,6 @@
 """Train linear policy with REINFORCE on CartPole"""
 from datetime import datetime
 
-import click
 import gym
 import jax
 import jax.numpy as jnp
@@ -11,7 +10,7 @@ from ajents.pg import REINFORCE
 
 @jax.jit
 def policy_logits(params, obs):
-    """Policy linear in observation"""
+    """Unnormalized log-policy. Simple policy linear in observation."""
     return params['weights'] @ obs + params['bias']
 
 def init_params(key, env):
@@ -21,15 +20,12 @@ def init_params(key, env):
               'bias': 0.01 * jax.random.normal(key2, (env.action_space.n,))}
     return params
 
-@click.command()
-@click.option('--profile/--no-profile', is_flag=True, default=False, show_default=True, help='If enabled, the JAX'
-    ' profiler will be enabled and results can be viewed in TensorBoard.')
-@click.option('--test/--no-test', is_flag=True, default=True, show_default=True)
-@click.option('--view/--no-view', is_flag=True, default=True, show_default=True)
-def main(profile, test, view):
+def main(test=True, view=True):
     """Train linear policy with REINFORCE on CartPole"""
-    env = gym.make('CartPole-v1')
     key = jax.random.PRNGKey(42)
+
+    # Initialize environment
+    env = gym.make('CartPole-v1')
 
     # Initialize policy
     key, subkey = jax.random.split(key)
@@ -40,19 +36,10 @@ def main(profile, test, view):
     key, subkey = jax.random.split(key)
     agent = REINFORCE(env, subkey, policy, params)
 
-    if profile:
-        print("Starting profiler...")
-        jax.profiler.start_trace('tmp/tensorboard')
-
     # Train agent
     start = datetime.now()
-    agent.learn(1000, 10, learning_rate=0.001, threshold=500)
+    agent.learn(1000, 10, learning_rate=0.001, threshold=500)    # 0:01:47.527730 w/o jit
     print(f"Training finished after {datetime.now() - start}!")
-
-    if profile:
-        print("Stopping profiler...")
-        jax.profiler.stop_trace()
-        print("Profiling results in TensorBoard (logdir=tmp/tensorboard).")
 
     # Test agent
     if test:
@@ -65,4 +52,4 @@ def main(profile, test, view):
         print(f"Rollout score: {sum(rewards)}")
 
 if __name__ == '__main__':
-    main()    # pylint: disable=no-value-for-parameter
+    main()

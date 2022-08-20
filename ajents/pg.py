@@ -1,4 +1,4 @@
-"""Policy Gradient algorithms"""
+"""Policy gradient algorithms"""
 from functools import partial
 
 import jax
@@ -9,7 +9,7 @@ from ajents.base import Agent
 
 
 class REINFORCE(Agent):
-    """REINFORCE (Vanilla Policy Gradient) Agent class"""
+    """REINFORCE (vanilla policy gradient) agent class"""
     def __init__(self, env, key, policy, params, causal=True, baseline=True):
         super().__init__(env, key)
 
@@ -21,7 +21,6 @@ class REINFORCE(Agent):
         # Variables
         self.params = params
 
-    # @partial(jax.jit, static_argnums=(0,))    # jit necessary here?
     @partial(jax.vmap, in_axes=(None, None, 0, 0))
     @partial(jax.vmap, in_axes=(None, None, 0, 0))
     def grad_log_policy(self, params, obs, action):
@@ -34,7 +33,7 @@ class REINFORCE(Agent):
     @partial(jax.jit, static_argnums=(0,))
     def _act_explore(self, params, obs, key):
         key, subkey = jax.random.split(key)
-        return self.policy.sample(params, obs, subkey, pre=True), key
+        return self.policy.sample(params, obs, subkey), key
 
     @partial(jax.jit, static_argnums=(0,))
     def _act_exploit(self, params, obs):
@@ -47,7 +46,7 @@ class REINFORCE(Agent):
             return action
         return self._act_exploit(self.params, obs)
 
-    # @partial(jax.jit, static_argnums=(0,))
+    @partial(jax.jit, static_argnums=(0,))
     def update(self, params, observations, actions, rewards, learning_rate):
         """Calculate policy gradient and take one gradient ascent step."""
         # Calculate policy gradient from rollouts
@@ -67,12 +66,8 @@ class REINFORCE(Agent):
         # Update policy
         return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads)#, returns.mean()
 
-    def learn(self, n_iterations, n_rollouts, learning_rate=None, render=False, threshold=None):
+    def learn(self, n_iterations, n_rollouts, learning_rate, render=False, threshold=None):
         """Train REINFORCE agent"""
-        if learning_rate is None:
-            lr = lambda i: 1/(i+1)
-        elif np.isscalar(learning_rate):
-            lr = lambda _: learning_rate
 
         for j in range(n_iterations):
             # Collect rollouts
@@ -89,14 +84,6 @@ class REINFORCE(Agent):
                 break
 
             # Calculate policy gradient and update policy
-            params_ = self.update(self.params, observations, actions, rewards, lr(j))
-            # print(actions[0, 0], observations[0, 0])
-            # print(self.policy.log_pi(self.params, observations[0, 0], actions[0, 0]))
-            # print(self.policy.f(self.params, observations[0, 0]))
-            # breakpoint()
-            # if jnp.isnan(params_['weights']).any():
-            # if j > 2:
-            #     breakpoint()
-            self.params = params_
+            self.params = self.update(self.params, observations, actions, rewards, learning_rate)
 
         return j + 1
