@@ -8,7 +8,6 @@ from ajents.base import CategoricalPolicy
 from ajents.pg import REINFORCE
 
 
-@jax.jit
 def policy_logits(params, obs):
     """Unnormalized log-policy. Simple policy linear in observation."""
     return params['weights'] @ obs + params['bias']
@@ -48,6 +47,7 @@ def main(test=True, view=True):
 
     # Watch final policy in action
     while view:
+        print("Finished. Press '^C' to exit.")
         _, _, rewards, _ = agent.rollout(explore=False, render=True)
         print(f"Rollout score: {sum(rewards)}")
 

@@ -64,11 +64,10 @@ class REINFORCE(Agent):
         grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
-        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads)#, returns.mean()
+        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads)
 
     def learn(self, n_iterations, n_rollouts, learning_rate, render=False, threshold=None):
         """Train REINFORCE agent"""
-
         for j in range(n_iterations):
             # Collect rollouts
             observations, actions, rewards, info = self.rollouts(n_rollouts, render=render)

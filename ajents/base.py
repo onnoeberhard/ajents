@@ -27,7 +27,7 @@ class Agent:
 
     def step(self, action, render=False):
         """Take one step in environment, return True if done"""
-        obs, reward, done, info = self.env.step(np.array(action))    # dtype=np.float32
+        obs, reward, done, info = self.env.step(np.array(action))
         if render:
             print(action, end='' if not done else '\n', flush=True)
             self.render()
@@ -53,7 +53,7 @@ class Agent:
         steps_left = steps or np.inf
         while steps_left:
             # Sample and execute action
-            action = self.act(obs, explore)    # , pre_action
+            action = self.act(obs, explore)
             obs, reward, done, _ = self.step(action, render)
 
             # Store interaction
