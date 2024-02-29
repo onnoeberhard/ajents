@@ -7,23 +7,13 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm.rich import tqdm
 
-from ajents import REINFORCE, BoltzmannPolicy, rollout, rollouts, pad_rect
+from ajents import REINFORCE, pad_rect, rollout, rollouts
 
-
-def policy_logits(params, obs):
-    """Unnormalized log-policy. Simple policy affine in observation."""
-    return params['weights'] @ obs + params['bias']
-
-def init_params(env, rng):
-    """Initialize parameters of log-affine policy."""
-    key1, key2 = jax.random.split(rng)
-    params = {'weights': 0.01 * jax.random.normal(key1, (env.action_space.n, env.observation_space.shape[0])),
-              'bias': 0.01 * jax.random.normal(key2, (env.action_space.n,))}
-    return params
 
 def main(test=True, view=True):
     """Train affine policy with REINFORCE on CartPole"""
     jax.config.update('jax_platforms', 'cpu')
+    # jax.config.update('jax_log_compiles', True)
     seed = 42
     rng = jax.random.PRNGKey(seed)
     np_rng = np.random.default_rng(seed)
@@ -31,26 +21,26 @@ def main(test=True, view=True):
     # Initialize environment
     env_name = 'CartPole-v1'
     env = gym.make(env_name)
-
-    # Initialize policy
-    rng, key = jax.random.split(rng)
-    policy = BoltzmannPolicy(policy_logits, temp=2.)
-    params = init_params(env, key)
+    du = env.action_space.n
+    obs, _ = env.reset(seed=0)
 
     # Initialize agent
-    agent = REINFORCE(policy, params)
+    rng, key = jax.random.split(rng)
+    agent = REINFORCE(du, policy_kwargs={'temp': 2.})
+    params = agent.init(key, obs, key, False)
 
     # Train agent
     start = datetime.now()
     rng, key = jax.random.split(rng)
-    agent.learn(env, key, np_rng, 1000, 10, threshold=500)
+    params, _ = agent.learn(params, env, key, np_rng, 1000, 10, 500, threshold=500)
     print(f"Training finished after {datetime.now() - start}!")
+    policy = jax.jit(lambda obs, rng: agent.apply(params, obs, rng, False))
 
     # Test agent
     if test:
         print("Testing policy...")
         rng, key = jax.random.split(rng)
-        _, _, rewards = rollouts(agent, env, key, np_rng, 500, explore=False, pb=tqdm)
+        _, _, rewards = rollouts(policy, env, key, np_rng, 500, pb=tqdm)
         rewards = pad_rect(rewards)
         print(f"Average test return: {jnp.nansum(rewards, 1).mean()}")
 
@@ -59,7 +49,7 @@ def main(test=True, view=True):
     env = gym.make(env_name, render_mode='human')
     while view:
         rng, key = jax.random.split(rng)
-        _, _, rewards, _ = rollout(agent, env, key, np_rng, explore=False, live=True)
+        _, _, rewards, _ = rollout(policy, env, key, np_rng, live=True)
         print(f"Episode return: {sum(rewards)}")
 
 if __name__ == '__main__':

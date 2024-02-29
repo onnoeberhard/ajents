@@ -5,7 +5,7 @@ description = "RL agents in JAX"
 authors = ["Onno Eberhard <onnoeberhard@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.8, <3.11"
+python = ">=3.9, <3.11"
 tqdm = "*"
 jax = "*"
 jaxlib = "*"
@@ -24,7 +24,10 @@ max-line-length = 120
 disable = [
     "protected-access",
     "invalid-name",
-    "redefined-outer-name"
+    "redefined-outer-name",
+    "attribute-defined-outside-init",
+    "invalid-field-call",
+    "not-a-mapping"
 ]
 
 [build-system]

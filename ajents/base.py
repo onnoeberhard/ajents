@@ -2,14 +2,14 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import flax.linen as nn
 
-class Agent:
+class Agent(nn.Module):
     """Abstract agent class"""
-    def act(self, obs, rng, explore=True):
-        """Sample action from policy"""
+    def __call__(self, obs, rng, explore):
         raise NotImplementedError
 
-def rollout(agent, env, rng_agent, rng_env, steps=None, explore=True, live=False):
+def rollout(policy, env, rng_agent, rng_env, steps=None, live=False):
     """Collect a rollout of `agent` in `env`. If `steps` is `None`, one episode is collected."""
     # Initialize return variables
     observations = []
@@ -29,7 +29,7 @@ def rollout(agent, env, rng_agent, rng_env, steps=None, explore=True, live=False
     while steps_left:
         # Sample and execute action
         rng_agent, key = jax.random.split(rng_agent)
-        action = agent.act(obs, key, explore)
+        action = policy(obs, key)
         obs, reward, terminated, truncated, _ = env.step(np.array(action))
         if live:
             print(action, end='\n' if terminated or truncated else '', flush=True)
@@ -48,7 +48,7 @@ def rollout(agent, env, rng_agent, rng_env, steps=None, explore=True, live=False
 
     return observations, actions, rewards, info
 
-def rollouts(agent, env, rng_agent, rng_env, n_rollouts, steps=None, explore=True, pb=None):
+def rollouts(policy, env, rng_agent, rng_env, n_rollouts, steps=None, pb=None):
     """Collect multiple rollouts"""
     observations = []
     actions = []
@@ -56,28 +56,30 @@ def rollouts(agent, env, rng_agent, rng_env, n_rollouts, steps=None, explore=Tru
 
     pb = pb or (lambda x: x)
     for _ in pb(range(n_rollouts)):
-        os, as_, rs, _ = rollout(agent, env, rng_agent, rng_env, steps, explore)
+        os, as_, rs, _ = rollout(policy, env, rng_agent, rng_env, steps)
         observations.append(os)
         actions.append(as_)
         rewards.append(rs)
 
     return observations, actions, rewards
 
-
-class BoltzmannPolicy:
+class BoltzmannPolicy(nn.Module):
     """Boltzmann (softmax) categorical policy"""
-    def __init__(self, f, temp=1.):
-        self.f = f  # Function of (params, obs) that returns logits (unnormalized scores) for all actions
-        self.temp = temp
+    du: int  # Dimensionality of action space
+    f_cls: type = nn.Dense  # Policy class. Flax module mapping observations to logits
+    temp: float = 1.  # Function of (params, obs) that returns logits (unnormalized scores) for all actions
 
-    def log_pi(self, params, obs, action):
+    def setup(self):
+        self.f = self.f_cls(self.du)
+
+    def log_pi(self, obs, action):
         """Return log-probability/density of action at observation"""
-        return jax.nn.log_softmax(self.temp * self.f(params, obs))[action.astype(int)]
+        return jax.nn.log_softmax(self.temp * self.f(obs))[action.astype(int)]
 
-    def sample(self, params, obs, rng):
+    def sample(self, obs, rng):
         """Sample action from policy"""
-        return jax.random.categorical(rng, self.temp * self.f(params, obs))
+        return jax.random.categorical(rng, self.temp * self.f(obs))
 
-    def greedy(self, params, obs):
+    def greedy(self, obs):
         """Greedy action"""
-        return jnp.argmax(self.f(params, obs))
+        return jnp.argmax(self.f(obs))

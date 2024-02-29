@@ -1,7 +1,9 @@
 """Policy gradient algorithms"""
-from functools import partial
 import warnings
+from dataclasses import field
+from functools import partial
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -9,41 +11,39 @@ import optax
 from tqdm import TqdmExperimentalWarning
 from tqdm.rich import trange
 
-from ajents.base import Agent, rollouts
+from ajents.base import Agent, BoltzmannPolicy, rollouts
 from ajents.util import pad_rect
 
 
 class REINFORCE(Agent):
     """REINFORCE (vanilla policy gradient) agent"""
-    def __init__(self, policy, params, causal=True, baseline=True, learning_rate=0.001):
-        # Fixed parameters
-        self.policy = policy
-        self.causal = causal
-        self.baseline = baseline
+    du: int  # Dimensionality of action space
+    policy_cls: type = BoltzmannPolicy
+    policy_kwargs: dict = field(default_factory=dict)
+    causal: bool = True
+    baseline: bool = True
+    learning_rate: float = 0.001
 
-        # Initialize optimizer
-        self.optimizer = optax.sgd(-learning_rate)
+    def __post_init__(self):
+        self.optimizer = optax.sgd(-self.learning_rate)
+        super().__post_init__()
 
-        # Variables
-        self.params = params
-        self.opt_state = self.optimizer.init(params)
+    def setup(self):
+        self._policy = self.policy_cls(self.du, **self.policy_kwargs)
 
-    @partial(jax.jit, static_argnums=(0, 4))
-    def _act(self, params, obs, rng, explore):
-        return self.policy.sample(params, obs, rng) if explore else self.policy.greedy(params, obs)
-
-    def act(self, obs, rng, explore=True):
+    def __call__(self, obs, rng, explore):
         """Sample action from current policy (or greedy if `explore` is `False`)"""
-        return self._act(self.params, obs, rng, explore)
+        return self._policy.sample(obs, rng) if explore else self._policy.greedy(obs)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @partial(nn.jit, static_argnums=(0,))
     def update(self, params, opt_state, observations, actions, rewards):
         """Calculate policy gradient and take one optimization step."""
+        lp = nn.apply(lambda self, obs, action: self._policy.log_pi(obs, action), self)
         def grad_log_policy(obs, action):
             """Gradient (wrt. params) of log-policy at given state-action pair"""
             return jax.lax.cond(jnp.isnan(action).any(),
                 lambda: jax.tree_map(lambda x: x*jnp.nan, params),
-                lambda: jax.jacobian(self.policy.log_pi)(params, obs, action)
+                lambda: jax.jacobian(lp)(params, obs, action)
             )
 
         # Calculate policy gradient from rollouts
@@ -67,13 +67,18 @@ class REINFORCE(Agent):
         params = optax.apply_updates(params, updates)
         return params, opt_state
 
-    def learn(self, env, rng_agent, rng_env, n_iterations, n_rollouts, threshold=None):
+    def learn(self, params, env, rng_agent, rng_env, n_iterations, n_rollouts, max_ep_len, threshold=None):
         """Train agent"""
+        opt_state = self.optimizer.init(params)
+        @jax.jit
+        def policy(params, obs, rng):
+            return self.apply(params, obs, rng, True)
+
         for j in (pb := trange(n_iterations)):
             # Collect rollouts
-            os, as_, rs = rollouts(self, env, rng_agent, rng_env, n_rollouts)
-            observations, actions, rewards = (pad_rect(x) for x in (os, as_, rs))
-            observations = observations[:, :-1]
+            rng_agent, key_agent = jax.random.split(rng_agent)
+            os, as_, rs = rollouts(partial(policy, params), env, key_agent, rng_env, n_rollouts)
+            observations, actions, rewards = (pad_rect(x, max_ep_len + 1) for x in (os, as_, rs))
             ret = np.nansum(rewards, 1).mean()
 
             # Monitoring
@@ -85,9 +90,9 @@ class REINFORCE(Agent):
                 break
 
             # Calculate policy gradient and update policy
-            self.params, self.opt_state = self.update(self.params, self.opt_state, observations, actions, rewards)
+            params, opt_state = self.update(params, opt_state, observations, actions, rewards)
 
-        return j + 1  # pylint: disable=undefined-loop-variable
+        return params, j + 1  # pylint: disable=undefined-loop-variable
 
 # Suppress warning from tqdm rich library
 warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
