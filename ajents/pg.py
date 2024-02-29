@@ -1,81 +1,83 @@
 """Policy gradient algorithms"""
 from functools import partial
+import warnings
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
+from tqdm import TqdmExperimentalWarning
+from tqdm.rich import trange
 
-from ajents.base import Agent
+from ajents.base import Agent, rollouts
+from ajents.util import pad_rect
 
 
 class REINFORCE(Agent):
-    """REINFORCE (vanilla policy gradient) agent class"""
-    def __init__(self, env, key, policy, params, causal=True, baseline=True):
-        super().__init__(env, key)
-
+    """REINFORCE (vanilla policy gradient) agent"""
+    def __init__(self, policy, params, causal=True, baseline=True, learning_rate=0.001):
         # Fixed parameters
         self.policy = policy
         self.causal = causal
         self.baseline = baseline
 
+        # Initialize optimizer
+        self.optimizer = optax.sgd(-learning_rate)
+
         # Variables
         self.params = params
+        self.opt_state = self.optimizer.init(params)
 
-    @partial(jax.vmap, in_axes=(None, None, 0, 0))
-    @partial(jax.vmap, in_axes=(None, None, 0, 0))
-    def grad_log_policy(self, params, obs, action):
-        """Gradient (wrt. params) of log-policy at given state-action pair"""
-        return jax.lax.cond(jnp.isnan(action).any(),
-            lambda: jax.tree_map(lambda x: x*jnp.nan, params),
-            lambda: jax.jacobian(self.policy.log_pi)(params, obs, action)
-        )
+    @partial(jax.jit, static_argnums=(0, 4))
+    def _act(self, params, obs, rng, explore):
+        return self.policy.sample(params, obs, rng) if explore else self.policy.greedy(params, obs)
 
-    @partial(jax.jit, static_argnums=(0,))
-    def _act_explore(self, params, obs, key):
-        key, subkey = jax.random.split(key)
-        return self.policy.sample(params, obs, subkey), key
+    def act(self, obs, rng, explore=True):
+        """Sample action from current policy (or greedy if `explore` is `False`)"""
+        return self._act(self.params, obs, rng, explore)
 
     @partial(jax.jit, static_argnums=(0,))
-    def _act_exploit(self, params, obs):
-        return self.policy.greedy(params, obs)
+    def update(self, params, opt_state, observations, actions, rewards):
+        """Calculate policy gradient and take one optimization step."""
+        def grad_log_policy(obs, action):
+            """Gradient (wrt. params) of log-policy at given state-action pair"""
+            return jax.lax.cond(jnp.isnan(action).any(),
+                lambda: jax.tree_map(lambda x: x*jnp.nan, params),
+                lambda: jax.jacobian(self.policy.log_pi)(params, obs, action)
+            )
 
-    def act(self, obs, explore=True):
-        """Sample action from current policy"""
-        if explore:
-            action, self.key = self._act_explore(self.params, obs, self.key)
-            return action
-        return self._act_exploit(self.params, obs)
-
-    @partial(jax.jit, static_argnums=(0,))
-    def update(self, params, observations, actions, rewards, learning_rate):
-        """Calculate policy gradient and take one gradient ascent step."""
         # Calculate policy gradient from rollouts
-        grads = self.grad_log_policy(params, observations, actions)
+        grads = jax.vmap(jax.vmap(grad_log_policy))(observations, actions)
         returns = jnp.nansum(rewards, 1)
         if self.causal:
+            # Use rewards to go (account for causality)
             rewards_to_go = returns[:, None] - jnp.nancumsum(rewards, 1) + rewards
             advantage = rewards_to_go - rewards_to_go.mean(0) if self.baseline else rewards_to_go
             grads = jax.tree_map(lambda x: jax.vmap(jax.vmap(jnp.multiply))(x, advantage), grads)
             grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
         else:
+            # Use total episode return
             advantage = returns - returns.mean() if self.baseline else returns
             grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
             grads = jax.tree_map(lambda x: jax.vmap(jnp.multiply)(x, advantage), grads)
         grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
-        return jax.tree_map(lambda p, g: p + learning_rate*g, params, grads)
+        updates, opt_state = self.optimizer.update(grads, opt_state, params)
+        params = optax.apply_updates(params, updates)
+        return params, opt_state
 
-    def learn(self, n_iterations, n_rollouts, learning_rate, render=False, threshold=None):
-        """Train REINFORCE agent"""
-        for j in range(n_iterations):
+    def learn(self, env, rng_agent, rng_env, n_iterations, n_rollouts, threshold=None):
+        """Train agent"""
+        for j in (pb := trange(n_iterations)):
             # Collect rollouts
-            observations, actions, rewards, info = self.rollouts(n_rollouts, render=render)
+            os, as_, rs = rollouts(self, env, rng_agent, rng_env, n_rollouts)
+            observations, actions, rewards = (pad_rect(x) for x in (os, as_, rs))
+            observations = observations[:, :-1]
             ret = np.nansum(rewards, 1).mean()
 
             # Monitoring
-            print(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. "
-                  f"Average return = {ret:f}, Completed in {info['time']:.2f}s.")
+            pb.write(f"Iteration {j + 1:{len(str(n_iterations))}d}/{n_iterations}. Average return = {ret:f}")
 
             # Break if threshold is reached
             if threshold is not None and ret >= threshold:
@@ -83,6 +85,9 @@ class REINFORCE(Agent):
                 break
 
             # Calculate policy gradient and update policy
-            self.params = self.update(self.params, observations, actions, rewards, learning_rate)
+            self.params, self.opt_state = self.update(self.params, self.opt_state, observations, actions, rewards)
 
-        return j + 1
+        return j + 1  # pylint: disable=undefined-loop-variable
+
+# Suppress warning from tqdm rich library
+warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)

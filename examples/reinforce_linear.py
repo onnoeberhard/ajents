@@ -1,55 +1,66 @@
-"""Train linear policy with REINFORCE on CartPole"""
+"""Train affine policy with REINFORCE on CartPole"""
 from datetime import datetime
 
-import gym
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
-from ajents.base import CategoricalPolicy
-from ajents.pg import REINFORCE
+import numpy as np
+from tqdm.rich import tqdm
+
+from ajents import REINFORCE, BoltzmannPolicy, rollout, rollouts, pad_rect
 
 
 def policy_logits(params, obs):
-    """Unnormalized log-policy. Simple policy linear in observation."""
+    """Unnormalized log-policy. Simple policy affine in observation."""
     return params['weights'] @ obs + params['bias']
 
-def init_params(key, env):
-    """Initialize parameters of log-linear policy."""
-    key1, key2 = jax.random.split(key)
+def init_params(env, rng):
+    """Initialize parameters of log-affine policy."""
+    key1, key2 = jax.random.split(rng)
     params = {'weights': 0.01 * jax.random.normal(key1, (env.action_space.n, env.observation_space.shape[0])),
               'bias': 0.01 * jax.random.normal(key2, (env.action_space.n,))}
     return params
 
 def main(test=True, view=True):
-    """Train linear policy with REINFORCE on CartPole"""
-    key = jax.random.PRNGKey(42)
+    """Train affine policy with REINFORCE on CartPole"""
+    jax.config.update('jax_platforms', 'cpu')
+    seed = 42
+    rng = jax.random.PRNGKey(seed)
+    np_rng = np.random.default_rng(seed)
 
     # Initialize environment
-    env = gym.make('CartPole-v1')
+    env_name = 'CartPole-v1'
+    env = gym.make(env_name)
 
     # Initialize policy
-    key, subkey = jax.random.split(key)
-    policy = CategoricalPolicy(policy_logits)
-    params = init_params(subkey, env)
+    rng, key = jax.random.split(rng)
+    policy = BoltzmannPolicy(policy_logits, temp=2.)
+    params = init_params(env, key)
 
     # Initialize agent
-    key, subkey = jax.random.split(key)
-    agent = REINFORCE(env, subkey, policy, params)
+    agent = REINFORCE(policy, params)
 
     # Train agent
     start = datetime.now()
-    agent.learn(1000, 10, learning_rate=0.001, threshold=500)    # 0:01:47.527730 w/o jit
+    rng, key = jax.random.split(rng)
+    agent.learn(env, key, np_rng, 1000, 10, threshold=500)
     print(f"Training finished after {datetime.now() - start}!")
 
     # Test agent
     if test:
-        _, _, rewards, _ = agent.rollouts(500, explore=False)
+        print("Testing policy...")
+        rng, key = jax.random.split(rng)
+        _, _, rewards = rollouts(agent, env, key, np_rng, 500, explore=False, pb=tqdm)
+        rewards = pad_rect(rewards)
         print(f"Average test return: {jnp.nansum(rewards, 1).mean()}")
 
     # Watch final policy in action
+    print("Finished. Press '^C' to exit.")
+    env = gym.make(env_name, render_mode='human')
     while view:
-        print("Finished. Press '^C' to exit.")
-        _, _, rewards, _ = agent.rollout(explore=False, render=True)
-        print(f"Rollout score: {sum(rewards)}")
+        rng, key = jax.random.split(rng)
+        _, _, rewards, _ = rollout(agent, env, key, np_rng, explore=False, live=True)
+        print(f"Episode return: {sum(rewards)}")
 
 if __name__ == '__main__':
     main()

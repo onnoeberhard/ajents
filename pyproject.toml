@@ -1,22 +1,23 @@
 [tool.poetry]
 name = "ajents"
-version = "0.0.1"
+version = "0.0.2a"
 description = "RL agents in JAX"
 authors = ["Onno Eberhard <onnoeberhard@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.8, <3.11"
-tqdm = "^4.64.0"
-jax = "^0.3.16"
-jaxlib = "^0.3.15"
+tqdm = "*"
+jax = "*"
+jaxlib = "*"
+optax = "*"
+rich = "*"
+flax = "*"
 
-[tool.poetry.dev-dependencies]
-gym = "^0.23.1"
-pygame = "^2.1.2"
-ipython = "^8.2.0"
-ipdb = "^0.13.9"
-pdbpp = "^0.10.3"
-pylint = "^2.13.8"
+[tool.poetry.group.dev.dependencies]
+ipython = "*"
+ipdb = "*"
+pdbpp = "*"
+gymnasium = {extras = ["classic-control"], version = "*"}
 
 [tool.pylint.messages_control]
 max-line-length = 120
