@@ -12,12 +12,16 @@ jaxlib = "*"
 optax = "*"
 rich = "*"
 flax = "*"
+distrax = "*"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "*"
 ipdb = "*"
 pdbpp = "*"
 gymnasium = {extras = ["classic-control"], version = "*"}
+jupyter = "*"
+oetils = "*"
+matplotlib = "*"
 
 [tool.pylint.messages_control]
 max-line-length = 120
@@ -27,7 +31,8 @@ disable = [
     "redefined-outer-name",
     "attribute-defined-outside-init",
     "invalid-field-call",
-    "not-a-mapping"
+    "not-a-mapping",
+    "not-an-iterable"
 ]
 
 [build-system]

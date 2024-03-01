@@ -25,7 +25,13 @@ class REINFORCE(Agent):
     learning_rate: float = 0.001
 
     def __post_init__(self):
-        self.optimizer = optax.sgd(-self.learning_rate)
+        # self.optimizer = optax.sgd(-self.learning_rate)
+        self.optimizer = optax.chain(
+            optax.zero_nans(),
+            optax.clip_by_global_norm(100),
+            optax.sgd(-self.learning_rate),
+            optax.zero_nans(),
+        )
         super().__post_init__()
 
     def setup(self):
@@ -70,9 +76,7 @@ class REINFORCE(Agent):
     def learn(self, params, env, rng_agent, rng_env, n_iterations, n_rollouts, max_ep_len, threshold=None):
         """Train agent"""
         opt_state = self.optimizer.init(params)
-        @jax.jit
-        def policy(params, obs, rng):
-            return self.apply(params, obs, rng, True)
+        policy = jax.jit(lambda params, obs, rng: self.apply(params, obs, rng, True))
 
         for j in (pb := trange(n_iterations)):
             # Collect rollouts

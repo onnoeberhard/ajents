@@ -1,13 +1,17 @@
 """Base classes for Ajents"""
+from dataclasses import field
+import distrax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import flax.linen as nn
 
+
 class Agent(nn.Module):
     """Abstract agent class"""
     def __call__(self, obs, rng, explore):
         raise NotImplementedError
+
 
 def rollout(policy, env, rng_agent, rng_env, steps=None, live=False):
     """Collect a rollout of `agent` in `env`. If `steps` is `None`, one episode is collected."""
@@ -48,6 +52,7 @@ def rollout(policy, env, rng_agent, rng_env, steps=None, live=False):
 
     return observations, actions, rewards, info
 
+
 def rollouts(policy, env, rng_agent, rng_env, n_rollouts, steps=None, pb=None):
     """Collect multiple rollouts"""
     observations = []
@@ -63,23 +68,64 @@ def rollouts(policy, env, rng_agent, rng_env, n_rollouts, steps=None, pb=None):
 
     return observations, actions, rewards
 
-class BoltzmannPolicy(nn.Module):
-    """Boltzmann (softmax) categorical policy"""
-    du: int  # Dimensionality of action space
-    f_cls: type = nn.Dense  # Policy class. Flax module mapping observations to logits
-    temp: float = 1.  # Function of (params, obs) that returns logits (unnormalized scores) for all actions
 
-    def setup(self):
-        self.f = self.f_cls(self.du)
+class Policy(nn.Module):
+    """Abstract policy class"""
+    du: int  # Dimensionality of action space
+    f_cls: type = nn.Dense  # Flax module mapping observations to outputs
+    f_kwargs: dict = field(default_factory=dict)  # Additional keyword arguments for mapping f
+
+    def __call__(self):
+        """Return distribution over actions at observation"""
+        raise NotImplementedError
 
     def log_pi(self, obs, action):
         """Return log-probability/density of action at observation"""
-        return jax.nn.log_softmax(self.temp * self.f(obs))[action.astype(int)]
+        return self(obs).log_prob(action)
 
     def sample(self, obs, rng):
         """Sample action from policy"""
-        return jax.random.categorical(rng, self.temp * self.f(obs))
+        return self(obs).sample(seed=rng)
 
     def greedy(self, obs):
         """Greedy action"""
-        return jnp.argmax(self.f(obs))
+        return self(obs).mode()
+
+
+class BoltzmannPolicy(Policy):
+    """Boltzmann (softmax) policy for discrete control"""
+    temp: float = 1.
+
+    @nn.compact
+    def __call__(self, obs):
+        """Return distribution over actions at observation"""
+        logits = self.f_cls(self.du, **self.f_kwargs)(obs)
+        return distrax.Softmax(logits, self.temp)
+
+
+class GaussianPolicy(Policy):
+    """Gaussian policy for continuous control"""
+    bounds: tuple = None
+
+    def setup(self):
+        self._f = self.f_cls(2*self.du, **self.f_kwargs)
+        self.f = lambda obs: jnp.split(self._f(obs), 2, -1)
+        self.bijector = squash(*self.bounds) if self.bounds else distrax.DiagLinear(jnp.ones(self.du))
+
+    def __call__(self, obs):
+        """Return distribution over actions at observation"""
+        mu, log_std = self.f(obs)
+        return distrax.Transformed(distrax.MultivariateNormalDiag(mu, jnp.exp(log_std)), self.bijector)
+
+    def greedy(self, obs):
+        """Greedy action"""
+        mu, _ = self.f(obs)
+        return self.bijector.forward(mu)    # Mode is difficult to compute
+
+def squash(min_, max_, slope=1):
+    """Bijector squashing input to (min_, max_) with given slope at x=0."""
+    return distrax.Block(distrax.Chain([
+        distrax.ScalarAffine(shift=min_, scale=max_ - min_),
+        distrax.Sigmoid(),
+        distrax.ScalarAffine(shift=0, scale=4 * slope / (max_ - min_))
+    ]), 1)
