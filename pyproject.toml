@@ -3,12 +3,16 @@ name = "ajents"
 version = "0.1"
 description = "RL agents in JAX"
 authors = [{ name = "Onno Eberhard", email = "onnoeberhard@gmail.com" }]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 dependencies = [
-    "jax",
+    "jax<0.11.2",
     "flax",
     "optax",
     "distrax",
+    "einops",
+    "oetils",
+    "wandb",
+    "gymnax",
 ]
 
 [tool.uv]
@@ -22,9 +26,13 @@ module-root = ""
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.uv.sources]
+gymnax = { git = "https://github.com/RobertTLange/gymnax.git" }
+
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
+    "pyright>=1.1.414",
 ]
 legacy = [
     "gymnasium",
