@@ -10,8 +10,8 @@ import optax
 from tqdm import TqdmExperimentalWarning
 from tqdm.rich import trange
 
-from ajents.base import Agent, BoltzmannPolicy, rollouts
-from ajents.util import pad_rect
+from .base import Agent, BoltzmannPolicy, rollouts
+from .util import pad_rect
 
 
 class REINFORCE(Agent):
@@ -22,7 +22,7 @@ class REINFORCE(Agent):
     baseline: bool = True
     gamma: float = 0.99
     learning_rate: float = 0.001
-    n_rollouts: int = 1
+    n_rollouts: int = 10
 
     def __post_init__(self):
         # self.optimizer = optax.sgd(-self.learning_rate)

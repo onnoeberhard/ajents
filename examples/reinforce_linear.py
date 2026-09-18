@@ -7,8 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm.rich import tqdm
 
-from ajents import REINFORCE, pad_rect, rollout, rollouts
-from ajents.base import GaussianPolicy
+from ajents.legacy import REINFORCE, pad_rect, rollout, rollouts, GaussianPolicy
 
 
 def main(seed=42, test=True, view=True):
@@ -24,13 +23,13 @@ def main(seed=42, test=True, view=True):
 
     # Initialize agent
     rng, key = jax.random.split(rng)
-    agent = REINFORCE(du)
+    agent = REINFORCE(du, 1000, n_rollouts=10)
     params = agent.init(key, obs, key, False)
 
     # Train agent
     start = datetime.now()
     rng, key = jax.random.split(rng)
-    params, _ = agent.learn(params, env, key, np_rng, 2000, 10, 500, threshold=500)
+    params, _ = agent.learn(params, env, key, np_rng, 2000, 500)
     print(f"Training finished after {datetime.now() - start}!")
     policy = jax.jit(lambda obs, rng: agent.apply(params, obs, rng, False))
 
@@ -51,6 +50,4 @@ def main(seed=42, test=True, view=True):
         print(f"Episode return: {sum(rewards)}")
 
 if __name__ == '__main__':
-    jax.config.update('jax_platforms', 'cpu')
-    # jax.config.update('jax_log_compiles', True)
     main()

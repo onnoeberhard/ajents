@@ -3,14 +3,11 @@ name = "ajents"
 version = "0.1"
 description = "RL agents in JAX"
 authors = [{ name = "Onno Eberhard", email = "onnoeberhard@gmail.com" }]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 dependencies = [
-    "tqdm",
     "jax",
-    "jaxlib",
-    "optax",
-    "rich",
     "flax",
+    "optax",
     "distrax",
 ]
 
@@ -18,9 +15,19 @@ dependencies = [
 default-groups = "all"
 
 [tool.uv.build-backend]
+module-name = ["ajents"]
 module-root = ""
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13",
+]
+legacy = [
+    "gymnasium",
+    "pygame",
+    "tqdm",
+]

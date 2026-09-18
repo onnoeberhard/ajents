@@ -1,4 +1,4 @@
-"""REINFOCE continuous control on the Pendulum"""
+"""REINFORCE continuous control on the Pendulum"""
 from datetime import datetime
 from functools import partial
 
@@ -8,18 +8,16 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm.rich import tqdm
 
-from ajents import REINFORCE, pad_rect, rollout, rollouts
-from ajents.base import GaussianPolicy
-from ajents.nn import MLP
+from ajents.legacy import REINFORCE, pad_rect, rollout, rollouts, GaussianPolicy, MLP
 
 
-def main(seed=42, test=True, view=True):
+def main(seed=50, test=True, view=True):
     """Train affine policy with REINFORCE on CartPole"""
     rng = jax.random.PRNGKey(seed)
     np_rng = np.random.default_rng(seed)
 
     # Initialize environment
-    env_name = 'MountainCarContinuous-v0'
+    env_name = 'Pendulum-v1'
     env = gym.make(env_name)
     du = env.action_space.shape[0]
     obs, _ = env.reset(seed=0)
@@ -28,13 +26,13 @@ def main(seed=42, test=True, view=True):
     # Initialize agent
     rng, key = jax.random.split(rng)
     policy_cls = partial(GaussianPolicy, f_cls=MLP, bounds=bounds)
-    agent = REINFORCE(du, policy_cls)
+    agent = REINFORCE(du, 200, policy_cls)
     params = agent.init(key, obs, key, False)
 
     # Train agent
     start = datetime.now()
     rng, key = jax.random.split(rng)
-    params, _ = agent.learn(params, env, key, np_rng, 2000, 10, 1000, threshold=500)
+    params, _ = agent.learn(params, env, key, np_rng, 1, 0)
     print(f"Training finished after {datetime.now() - start}!")
     policy = jax.jit(lambda obs, rng: agent.apply(params, obs, rng, False))
 
@@ -55,6 +53,4 @@ def main(seed=42, test=True, view=True):
         print(f"Episode return: {sum(rewards)}")
 
 if __name__ == '__main__':
-    jax.config.update('jax_platforms', 'cpu')
-    # jax.config.update('jax_log_compiles', True)
     main()
