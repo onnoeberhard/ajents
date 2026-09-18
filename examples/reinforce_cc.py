@@ -1,5 +1,6 @@
-"""Train affine policy with REINFORCE on CartPole"""
+"""REINFOCE continuous control on the Pendulum"""
 from datetime import datetime
+from functools import partial
 
 import gymnasium as gym
 import jax
@@ -9,6 +10,7 @@ from tqdm.rich import tqdm
 
 from ajents import REINFORCE, pad_rect, rollout, rollouts
 from ajents.base import GaussianPolicy
+from ajents.nn import MLP
 
 
 def main(seed=42, test=True, view=True):
@@ -17,20 +19,22 @@ def main(seed=42, test=True, view=True):
     np_rng = np.random.default_rng(seed)
 
     # Initialize environment
-    env_name = 'CartPole-v1'
+    env_name = 'MountainCarContinuous-v0'
     env = gym.make(env_name)
-    du = env.action_space.n
+    du = env.action_space.shape[0]
     obs, _ = env.reset(seed=0)
+    bounds = env.action_space.low[0], env.action_space.high[0]
 
     # Initialize agent
     rng, key = jax.random.split(rng)
-    agent = REINFORCE(du)
+    policy_cls = partial(GaussianPolicy, f_cls=MLP, bounds=bounds)
+    agent = REINFORCE(du, policy_cls)
     params = agent.init(key, obs, key, False)
 
     # Train agent
     start = datetime.now()
     rng, key = jax.random.split(rng)
-    params, _ = agent.learn(params, env, key, np_rng, 2000, 10, 500, threshold=500)
+    params, _ = agent.learn(params, env, key, np_rng, 2000, 10, 1000, threshold=500)
     print(f"Training finished after {datetime.now() - start}!")
     policy = jax.jit(lambda obs, rng: agent.apply(params, obs, rng, False))
 

@@ -1,6 +1,5 @@
 """Policy gradient algorithms"""
 import warnings
-from dataclasses import field
 from functools import partial
 
 import flax.linen as nn
@@ -16,13 +15,14 @@ from ajents.util import pad_rect
 
 
 class REINFORCE(Agent):
-    """REINFORCE (vanilla policy gradient) agent"""
+    """REINFORCE agent without a learned baseline"""
     du: int  # Dimensionality of action space
+    max_ep_len: int
     policy_cls: type = BoltzmannPolicy
-    policy_kwargs: dict = field(default_factory=dict)
-    causal: bool = True
     baseline: bool = True
+    gamma: float = 0.99
     learning_rate: float = 0.001
+    n_rollouts: int = 1
 
     def __post_init__(self):
         # self.optimizer = optax.sgd(-self.learning_rate)
@@ -35,16 +35,16 @@ class REINFORCE(Agent):
         super().__post_init__()
 
     def setup(self):
-        self._policy = self.policy_cls(self.du, **self.policy_kwargs)
+        self.policy = self.policy_cls(self.du)
 
     def __call__(self, obs, rng, explore):
         """Sample action from current policy (or greedy if `explore` is `False`)"""
-        return self._policy.sample(obs, rng) if explore else self._policy.greedy(obs)
+        return self.policy.sample(obs, rng) if explore else self.policy.greedy(obs)
 
     @partial(nn.jit, static_argnums=(0,))
     def update(self, params, opt_state, observations, actions, rewards):
         """Calculate policy gradient and take one optimization step."""
-        lp = nn.apply(lambda self, obs, action: self._policy.log_pi(obs, action), self)
+        lp = nn.apply(lambda self, obs, action: self.policy.log_pi(obs, action), self)
         def grad_log_policy(obs, action):
             """Gradient (wrt. params) of log-policy at given state-action pair"""
             return jax.lax.cond(jnp.isnan(action).any(),
@@ -53,19 +53,12 @@ class REINFORCE(Agent):
             )
 
         # Calculate policy gradient from rollouts
-        grads = jax.vmap(jax.vmap(grad_log_policy))(observations, actions)
+        log_pi = jax.vmap(jax.vmap(grad_log_policy))(observations, actions)
         returns = jnp.nansum(rewards, 1)
-        if self.causal:
-            # Use rewards to go (account for causality)
-            rewards_to_go = returns[:, None] - jnp.nancumsum(rewards, 1) + rewards
-            advantage = rewards_to_go - rewards_to_go.mean(0) if self.baseline else rewards_to_go
-            grads = jax.tree_map(lambda x: jax.vmap(jax.vmap(jnp.multiply))(x, advantage), grads)
-            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
-        else:
-            # Use total episode return
-            advantage = returns - returns.mean() if self.baseline else returns
-            grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
-            grads = jax.tree_map(lambda x: jax.vmap(jnp.multiply)(x, advantage), grads)
+        rewards_to_go = returns[:, None] - jnp.nancumsum(rewards, 1) + rewards
+        advantage = rewards_to_go - rewards_to_go.mean(0) if self.baseline else rewards_to_go
+        grads = jax.tree_map(lambda x: jax.vmap(jax.vmap(jnp.multiply))(x, advantage), log_pi)
+        grads = jax.tree_map(lambda x: jnp.nansum(x, 1), grads)
         grads = jax.tree_map(lambda x: x.mean(0), grads)
 
         # Update policy
@@ -73,7 +66,7 @@ class REINFORCE(Agent):
         params = optax.apply_updates(params, updates)
         return params, opt_state
 
-    def learn(self, params, env, rng_agent, rng_env, n_iterations, n_rollouts, max_ep_len, threshold=None):
+    def learn(self, params, env, rng_agent, rng_env, n_iterations, threshold=None):
         """Train agent"""
         opt_state = self.optimizer.init(params)
         policy = jax.jit(lambda params, obs, rng: self.apply(params, obs, rng, True))
@@ -81,8 +74,8 @@ class REINFORCE(Agent):
         for j in (pb := trange(n_iterations)):
             # Collect rollouts
             rng_agent, key_agent = jax.random.split(rng_agent)
-            os, as_, rs = rollouts(partial(policy, params), env, key_agent, rng_env, n_rollouts)
-            observations, actions, rewards = (pad_rect(x, max_ep_len + 1) for x in (os, as_, rs))
+            os, as_, rs = rollouts(partial(policy, params), env, key_agent, rng_env, self.n_rollouts)
+            observations, actions, rewards = (pad_rect(x, self.max_ep_len + 1) for x in (os, as_, rs))
             ret = np.nansum(rewards, 1).mean()
 
             # Monitoring

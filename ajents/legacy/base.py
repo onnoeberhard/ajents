@@ -73,7 +73,6 @@ class Policy(nn.Module):
     """Abstract policy class"""
     du: int  # Dimensionality of action space
     f_cls: type = nn.Dense  # Flax module mapping observations to outputs
-    f_kwargs: dict = field(default_factory=dict)  # Additional keyword arguments for mapping f
 
     def __call__(self):
         """Return distribution over actions at observation"""
@@ -99,7 +98,7 @@ class BoltzmannPolicy(Policy):
     @nn.compact
     def __call__(self, obs):
         """Return distribution over actions at observation"""
-        logits = self.f_cls(self.du, **self.f_kwargs)(obs)
+        logits = self.f_cls(self.du)(obs)
         return distrax.Softmax(logits, self.temp)
 
 
@@ -108,7 +107,7 @@ class GaussianPolicy(Policy):
     bounds: tuple = None
 
     def setup(self):
-        self._f = self.f_cls(2*self.du, **self.f_kwargs)
+        self._f = self.f_cls(2*self.du)
         self.f = lambda obs: jnp.split(self._f(obs), 2, -1)
         self.bijector = squash(*self.bounds) if self.bounds else distrax.DiagLinear(jnp.ones(self.du))
 
@@ -121,6 +120,7 @@ class GaussianPolicy(Policy):
         """Greedy action"""
         mu, _ = self.f(obs)
         return self.bijector.forward(mu)    # Mode is difficult to compute
+
 
 def squash(min_, max_, slope=1):
     """Bijector squashing input to (min_, max_) with given slope at x=0."""
