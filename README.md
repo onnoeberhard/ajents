@@ -1,4 +1,4 @@
-# Ajents: RL agents in JAX
+# Ajents: Reinforcement Learning Algorithms in JAX
 This project contains minimal `flax.nnx`-based implementations of Proximal Policy Optimization (for categorical action spaces) and Soft Actor Critic (for continuous action spaces). Similarly to [CleanRL](https://github.com/vwxyzjn/cleanrl), the implementations are contained to single files for easy adaptation. The implementation expects environments to adhere to the [Gymnax](https://github.com/RobertTLange/gymnax) API.
 
 As a starting point, `python ajents/ppo.py` will train a PPO agent on `Cartpole-v1` (in a few seconds on CPU) and `python ajents/sac.py` will train an SAC agent on `Pendulum-v1` (this takes considerably longer since the implementation is purely sequential).
@@ -27,6 +27,17 @@ with open('actor.pkl', 'wb') as f:
     pickle.dump(actor, f)
 
 wandb.finish()
+```
+
+### Citation
+```bibtex
+@misc{eberhard-2026-ajents,
+  title = {Ajents: Reinforcement Learning Algorithms in JAX},
+  title = {Onno Eberhard},
+  year = {2026},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/onnoeberhard/ajents}},
+}
 ```
 
 If there are any problems, or if you have a question, don't hesitate to open an issue here on GitHub.
